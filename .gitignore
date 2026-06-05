@@ -1,3 +1,7 @@
+# AutoLux runtime files
+dimmer.lock
+dimmer.log
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
