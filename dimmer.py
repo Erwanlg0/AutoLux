@@ -1,15 +1,21 @@
 import time
 import ctypes
 import os
+import zoneinfo
 from pathlib import Path
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from miio import Yeelight, DeviceException
+from astral.location import LocationInfo
+from astral.sun import sun
 
 load_dotenv(Path(__file__).with_name(".env"))
 
 YEELIGHT_IP = os.environ["YEELIGHT_IP"]
 YEELIGHT_TOKEN = os.environ["YEELIGHT_TOKEN"]
+LATITUDE = float(os.environ["LATITUDE"])
+LONGITUDE = float(os.environ["LONGITUDE"])
+TIMEZONE = os.environ["TIMEZONE"]
 
 LOG_FILE = Path(__file__).with_name("dimmer.log")
 MUTEX_NAME = "Global\\LumiereDimmerSingleton"
@@ -46,41 +52,44 @@ def acquire_single_instance_lock():
     MUTEX_HANDLE = mutex_handle
     return True
 
+
 class CircadianProfile:
-    def __init__(self, start_hour, duration_minutes, reset_hour=8):
-        self.start_hour = start_hour
-        self.duration = duration_minutes
-        self.reset_hour = reset_hour
+    def __init__(self, latitude: float, longitude: float, timezone_str: str):
+        self.location = LocationInfo("", "", timezone_str, latitude, longitude)
 
-    def calculate(self, current_time):
-        start_time = current_time.replace(hour=self.start_hour, minute=0, second=0, microsecond=0)
-        end_time = start_time + timedelta(minutes=self.duration)
-        reset_time = current_time.replace(hour=self.reset_hour, minute=0, second=0, microsecond=0)
+    def calculate(self, current_time: datetime):
+        tz = zoneinfo.ZoneInfo(self.location.timezone)
+        local_now = current_time.astimezone(tz)
+        
+        s = sun(self.location.observer, date=local_now.date(), tzinfo=tz)
+        sunrise = s["sunrise"]
+        sunset = s["sunset"]
+        dusk = s["dusk"]
 
-        in_overnight_low_window = (
-            self.start_hour > self.reset_hour
-            and current_time < start_time
-            and current_time < reset_time
-        )
+        morning_peak = sunrise + timedelta(hours=2)
+        evening_start = sunset - timedelta(hours=3)
 
-        if in_overnight_low_window:
-            progress = 1.0
-            phase = "after"
-        elif current_time < start_time:
-            progress = 0.0
-            phase = "before"
-        elif current_time >= end_time:
-            progress = 1.0
-            phase = "after"
+        if local_now < sunrise:
+            return 12, 1700, "night"
+            
+        elif local_now < morning_peak:
+            progress = (local_now - sunrise).total_seconds() / (morning_peak - sunrise).total_seconds()
+            brightness = int(12 + (progress * 88))
+            temp = int(1700 + (progress * 3300))
+            return max(12, min(100, brightness)), max(1700, min(5000, temp)), "morning"
+            
+        elif local_now < evening_start:
+            return 100, 5000, "day"
+            
+        elif local_now < dusk:
+            progress = (local_now - evening_start).total_seconds() / (dusk - evening_start).total_seconds()
+            brightness = int(100 - (progress * 88))
+            temp = int(5000 - (progress * 3300))
+            return max(12, min(100, brightness)), max(1700, min(5000, temp)), "evening"
+            
         else:
-            elapsed = (current_time - start_time).total_seconds() / 60
-            progress = min(1.0, max(0.0, elapsed / self.duration))
-            phase = "during"
+            return 12, 1700, "night"
 
-        brightness = int(100 - (progress * (100 - 12)))
-        temp = int(5000 - (progress * 3300))
-
-        return max(10, brightness), max(1700, temp), phase
 
 class LightController:
     def __init__(self, ip, token):
@@ -168,7 +177,7 @@ class LightController:
             return "error"
 
 def run_service():
-    profile = CircadianProfile(start_hour=19, duration_minutes=270, reset_hour=8)
+    profile = CircadianProfile(latitude=LATITUDE, longitude=LONGITUDE, timezone_str=TIMEZONE)
     controller = None
     automation_enabled = True
     toggle_command_armed = True
