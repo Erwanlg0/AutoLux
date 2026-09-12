@@ -130,13 +130,13 @@ class LightController:
             return power == 'on' and self._is_toggle_command(current_bright, current_ct)
         except DeviceException as ex:
             write_log(f"DeviceException in detect_toggle_command: {ex}")
-            return False
+            return None
         except ValueError as ex:
             write_log(f"ValueError in detect_toggle_command: {ex}")
-            return False
+            return None
         except Exception as ex:
             write_log(f"Unexpected exception in detect_toggle_command: {ex}")
-            return False
+            return None
 
     def apply(self, brightness, temperature):
         try:
@@ -211,7 +211,7 @@ def run_service():
                     f"({TOGGLE_COMMAND_BRIGHTNESS}%/{TOGGLE_COMMAND_CT}K). Automation {mode}."
                 )
                 toggle_command_armed = False
-            elif not toggle_command_active:
+            elif toggle_command_active is False:
                 toggle_command_armed = True
 
             if automation_enabled:
