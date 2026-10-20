@@ -64,10 +64,13 @@ class CircadianProfile:
         s = sun(self.location.observer, date=local_now.date(), tzinfo=tz)
         sunrise = s["sunrise"]
         sunset = s["sunset"]
-        dusk = s["dusk"]
 
         morning_peak = sunrise + timedelta(hours=2)
-        evening_start = sunset - timedelta(hours=3)
+        evening_start = max(
+            local_now.replace(hour=18, minute=30, second=0, microsecond=0),
+            min(sunset - timedelta(hours=1), local_now.replace(hour=20, minute=30, second=0, microsecond=0)),
+        )
+        bedtime = local_now.replace(hour=23, minute=0, second=0, microsecond=0)
 
         if local_now < sunrise:
             return 12, 1700, "night"
@@ -81,8 +84,8 @@ class CircadianProfile:
         elif local_now < evening_start:
             return 100, 5000, "day"
             
-        elif local_now < dusk:
-            progress = (local_now - evening_start).total_seconds() / (dusk - evening_start).total_seconds()
+        elif local_now < bedtime:
+            progress = (local_now - evening_start).total_seconds() / (bedtime - evening_start).total_seconds()
             brightness = int(100 - (progress * 88))
             temp = int(5000 - (progress * 3300))
             return max(12, min(100, brightness)), max(1700, min(5000, temp)), "evening"
